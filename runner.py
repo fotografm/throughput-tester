@@ -40,6 +40,9 @@ def _import_testers():
 
 def cmd_server(transports: list[str]):
     mods = _import_testers()
+    # RNS.Reticulum must be initialized in the main thread (it sets signal handlers)
+    if "rns" in transports:
+        mods["rns"].init_rns()
     threads = []
     for t in transports:
         th = threading.Thread(target=mods[t].server, name=f"server-{t}", daemon=True)
@@ -64,6 +67,9 @@ def cmd_test(to_node: str, transports: list[str]):
     to_label   = cfg["nodes"][to_node]["label"]
 
     mods = _import_testers()
+    # Pre-init RNS in main thread before any tests run
+    if "rns" in transports:
+        mods["rns"].init_rns()
     print(f"\nTesting  {from_label}  →  {to_label}")
     print(f"Transports: {', '.join(transports)}\n")
 

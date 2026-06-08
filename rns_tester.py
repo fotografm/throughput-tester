@@ -16,6 +16,7 @@ import time
 import statistics
 import os
 import threading
+import queue as _queue
 import json
 from pathlib import Path
 
@@ -27,9 +28,10 @@ from common import load_config
 TRANSPORT   = "reticulum"
 APP_NAME    = "throughput_tester"
 ASPECT      = "tester"
-ID_DIR      = Path(__file__).parent / "rns_identity"
-RNS_CONF    = Path(__file__).parent / "rns_config"
-CHUNK       = 1024        # RNS packet payload limit
+ID_DIR          = Path(__file__).parent / "rns_identity"
+RNS_CONF        = Path(__file__).parent / "rns_config"        # server: has TCP listeners
+RNS_CLIENT_CONF = Path(__file__).parent / "rns_client_config" # client: outbound only, no port conflict
+CHUNK           = 1024        # RNS packet payload limit
 
 
 # ---------------------------------------------------------------------------
@@ -64,11 +66,9 @@ class _ServerLink:
     def __init__(self, link: RNS.Link, cfg: dict):
         self.link = link
         self.cfg = cfg
-        self.channel = None
-        link.set_link_established_callback(self._on_established)
         link.set_link_closed_callback(self._on_closed)
-
-    def _on_established(self, link):
+        # Link is already established when this is called from dest's callback —
+        # set up the channel immediately rather than waiting for a second callback.
         self.channel = link.get_channel()
         self.channel.register_message_type(_TesterMsg)
         self.channel.add_message_handler(self._on_msg)
@@ -84,28 +84,39 @@ class _ServerLink:
         if cmd == "PING":
             self.channel.send(_TesterMsg({"cmd": "PONG"}))
         elif cmd == "UPLOAD":
-            pass  # server receives; client measures
+            pass  # server just receives; client measures elapsed
         elif cmd == "UPLOAD_DONE":
-            elapsed = msg.data.get("elapsed_ms", 0)
             n = msg.data.get("n", 0)
+            elapsed = msg.data.get("elapsed_ms", 0)
             self.channel.send(_TesterMsg({"cmd": "UPLOAD_ACK", "n": n, "elapsed_ms": elapsed}))
         elif cmd == "DOWNLOAD_REQ":
+            # Run download in a thread so we don't block the RNS event loop
             n = msg.data.get("n", 0)
-            # send in chunks
-            t0 = time.monotonic()
+            threading.Thread(target=self._send_download, args=(n,), daemon=True).start()
+        elif cmd == "BYE":
+            self.link.teardown()
+
+    def _send_download(self, n: int):
+        RNS_CHUNK = 6000  # well under MDU=8111 after msgpack overhead
+        try:
             sent = 0
             while sent < n:
-                size = min(800, n - sent)  # keep well under MDU
+                size = min(RNS_CHUNK, n - sent)
+                deadline = time.time() + 60
+                while not self.channel.is_ready_to_send():
+                    if time.time() > deadline:
+                        raise TimeoutError("channel not ready for download send")
+                    time.sleep(0.01)
                 self.channel.send(_TesterMsg({"cmd": "DOWNLOAD_DATA",
-                                              "payload": os.urandom(size).hex(),
+                                              "data": os.urandom(size),
                                               "sent": sent + size,
                                               "total": n}))
                 sent += size
-            elapsed_ms = (time.monotonic() - t0) * 1000
-            self.channel.send(_TesterMsg({"cmd": "DOWNLOAD_DONE",
-                                          "n": n, "elapsed_ms": elapsed_ms}))
-        elif cmd == "BYE":
-            self.link.teardown()
+            while not self.channel.is_ready_to_send():
+                time.sleep(0.01)
+            self.channel.send(_TesterMsg({"cmd": "DOWNLOAD_DONE", "n": n}))
+        except Exception as e:
+            print(f"[rns] _send_download error: {e}")
 
 
 class _TesterMsg(RNS.Channel.MessageBase):
@@ -116,19 +127,27 @@ class _TesterMsg(RNS.Channel.MessageBase):
         self.data = data or {}
 
     def pack(self) -> bytes:
-        return msgpack.packb(self.data)
+        return msgpack.packb(self.data, use_bin_type=True)
 
     def unpack(self, raw: bytes):
-        self.data = msgpack.unpackb(raw)
+        self.data = msgpack.unpackb(raw, raw=False)
 
 
 # ---------------------------------------------------------------------------
 # Server
 # ---------------------------------------------------------------------------
 
+def init_rns():
+    """Initialize Reticulum — must be called from the main thread."""
+    RNS.Reticulum(configdir=str(RNS_CONF), loglevel=RNS.LOG_WARNING)
+
+
 def server():
     cfg = load_config()
-    RNS.Reticulum(configdir=str(RNS_CONF), loglevel=RNS.LOG_WARNING)
+    # init_rns() must have been called from main thread already;
+    # if running standalone, call it here.
+    if RNS.Reticulum.get_instance() is None:
+        RNS.Reticulum(configdir=str(RNS_CONF), loglevel=RNS.LOG_WARNING)
     identity = _load_or_create_identity()
     dest = RNS.Destination(identity, RNS.Destination.IN, RNS.Destination.SINGLE,
                            APP_NAME, ASPECT)
@@ -159,7 +178,11 @@ def client(peer_node: str) -> dict:
     runs = t["throughput_runs"]
     n_bytes = t["throughput_mb"] * 1024 * 1024
 
-    RNS.Reticulum(configdir=str(RNS_CONF), loglevel=RNS.LOG_WARNING)
+    # Use the same configdir as the server service (share_instance=Yes).
+    # This attaches to the running service's RNS instance rather than creating
+    # a second instance that would open conflicting TCP connections.
+    if RNS.Reticulum.get_instance() is None:
+        RNS.Reticulum(configdir=str(RNS_CONF), loglevel=RNS.LOG_WARNING)
     peer_hash = bytes.fromhex(peer_hash_hex)
 
     if not RNS.Transport.has_path(peer_hash):
@@ -185,21 +208,26 @@ def client(peer_node: str) -> dict:
     channel = link.get_channel()
     channel.register_message_type(_TesterMsg)
 
-    recv_event = threading.Event()
-    recv_buf = []
+    # Wait until the channel outlet is usable (brief delay after link establishment)
+    deadline = time.time() + 10
+    while not channel.is_ready_to_send():
+        if time.time() > deadline:
+            raise TimeoutError("RNS channel not ready within 10s after link establishment")
+        time.sleep(0.1)
+
+    recv_q = _queue.Queue()
 
     def on_msg(msg):
         if isinstance(msg, _TesterMsg):
-            recv_buf.append(msg.data)
-            recv_event.set()
+            recv_q.put(msg.data)
 
     channel.add_message_handler(on_msg)
 
     def _wait(timeout=60) -> dict:
-        recv_event.clear()
-        if not recv_event.wait(timeout=timeout):
+        try:
+            return recv_q.get(timeout=timeout)
+        except _queue.Empty:
             raise TimeoutError("RNS response timeout")
-        return recv_buf.pop(0)
 
     # --- latency ---
     rtts = []
@@ -217,19 +245,21 @@ def client(peer_node: str) -> dict:
     lat_jitter = statistics.stdev(rtts) if len(rtts) > 1 else 0.0
 
     # --- upload (client sends, times itself, sends elapsed to server) ---
+    RNS_CHUNK = 6000  # bytes per packet, well under MDU=8111
     up_speeds = []
     for _ in range(runs):
         t0 = time.monotonic()
         sent = 0
         while sent < n_bytes:
-            size = min(800, n_bytes - sent)
-            channel.send(_TesterMsg({"cmd": "UPLOAD",
-                                     "payload": os.urandom(size).hex()}))
+            size = min(RNS_CHUNK, n_bytes - sent)
+            while not channel.is_ready_to_send():
+                time.sleep(0.01)
+            channel.send(_TesterMsg({"cmd": "UPLOAD", "data": os.urandom(size)}))
             sent += size
         elapsed_ms = (time.monotonic() - t0) * 1000
         channel.send(_TesterMsg({"cmd": "UPLOAD_DONE",
                                  "n": n_bytes, "elapsed_ms": elapsed_ms}))
-        _wait(30)  # UPLOAD_ACK
+        _wait(60)  # UPLOAD_ACK
         up_speeds.append(n_bytes * 8 / elapsed_ms / 1000)
 
     # --- download ---
@@ -239,10 +269,10 @@ def client(peer_node: str) -> dict:
         received = 0
         t0 = time.monotonic()
         while True:
-            r = _wait(60)
+            r = _wait(120)
             cmd = r.get("cmd")
             if cmd == "DOWNLOAD_DATA":
-                received += len(bytes.fromhex(r["payload"]))
+                received += len(r.get("data", b""))
             elif cmd == "DOWNLOAD_DONE":
                 elapsed_ms = (time.monotonic() - t0) * 1000
                 dn_speeds.append(n_bytes * 8 / elapsed_ms / 1000)

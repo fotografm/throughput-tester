@@ -5,3 +5,4 @@ rns_config/
 rns_identity
 i2p_keys/
 .env
+config.json

@@ -84,8 +84,13 @@ def _sam_stream_connect(s: socket.socket, session_id: str, dest: str):
 
 
 def _sam_stream_accept(s: socket.socket, session_id: str):
+    """Send STREAM ACCEPT and read the STATUS reply. Socket then blocks until a
+    remote connects, at which point SAM sends the remote destination line and the
+    socket becomes the live stream. Caller reads the destination line next."""
     s.sendall(f"STREAM ACCEPT ID={session_id} SILENT=false\n".encode())
-    # no reply line here — the socket becomes the accepted stream on next connect
+    r = _sam_parse(_sam_readline(s))
+    if r.get("RESULT") != "OK":
+        raise SAMError(f"STREAM ACCEPT failed: {r}")
 
 
 def _sam_naming_lookup(s: socket.socket, name: str) -> str:
@@ -179,21 +184,26 @@ def server():
     sam_port = cfg["ports"]["i2p_sam"]
 
     privkey, dest = generate_or_load_keys(sam_host, sam_port)
-    print(f"[i2p] server destination: {dest[:32]}...")
+    session_id = f"thru-svr-{os.getpid()}"
+
+    # Session control socket — must stay open for the session lifetime
+    ctrl = _open_sam(sam_host, sam_port)
+    _sam_session_create(ctrl, "STREAM", session_id, privkey)
+    print(f"[i2p] server ready (session {session_id})")
 
     while True:
-        ctrl = _open_sam(sam_host, sam_port)
-        _sam_session_create(ctrl, "STREAM", "tester-server", privkey)
-        _sam_stream_accept(ctrl, "tester-server")
-        # wait for the incoming stream handshake line
-        line = _recv_line_sock(ctrl)  # contains remote destination
-        print(f"[i2p] accepted stream from {line[:32]}...")
+        # New SAM socket for each incoming stream (SAMv3: session ≠ stream socket)
+        acc = _open_sam(sam_host, sam_port)
         try:
-            _handle_session(ctrl)
+            _sam_stream_accept(acc, session_id)
+            # SAM sends the remote destination line when a client connects
+            remote = _recv_line_sock(acc)
+            print(f"[i2p] accepted stream from {remote[:32]}...")
+            _handle_session(acc)
         except Exception as e:
             print(f"[i2p] session error: {e}")
         finally:
-            ctrl.close()
+            acc.close()
 
 
 # ---------------------------------------------------------------------------
@@ -213,10 +223,15 @@ def client(peer_node: str) -> dict:
     n_bytes = t["throughput_mb"] * 1024 * 1024
 
     privkey, _ = generate_or_load_keys(sam_host, sam_port)
+    session_id = f"thru-cli-{os.getpid()}"
 
+    # Session control socket (SAMv3: session and stream use separate sockets)
+    ctrl = _open_sam(sam_host, sam_port)
+    _sam_session_create(ctrl, "STREAM", session_id, privkey)
+
+    # Stream socket for the actual data
     sock = _open_sam(sam_host, sam_port)
-    _sam_session_create(sock, "STREAM", "tester-client", privkey)
-    _sam_stream_connect(sock, "tester-client", peer_dest)
+    _sam_stream_connect(sock, session_id, peer_dest)
 
     # latency
     rtts = []
@@ -256,6 +271,7 @@ def client(peer_node: str) -> dict:
 
     sock.sendall(b"BYE\n")
     sock.close()
+    ctrl.close()
 
     return {
         "latency_avg_ms":    lat_avg,
