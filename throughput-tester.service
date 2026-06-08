@@ -1,0 +1,13 @@
+[Unit]
+Description=Throughput Tester Server
+After=network.target yggdrasil.service i2pd.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/throughput-tester
+ExecStart=/opt/throughput-tester/venv/bin/python runner.py server
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

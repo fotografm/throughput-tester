@@ -1,0 +1,37 @@
+{
+  "this_node": "ct107",
+  "nodes": {
+    "ct107": {
+      "label": "ct107 on x12-2",
+      "tcp_addr": "192.168.8.107",
+      "ygg_addr": "",
+      "i2p_dest": "",
+      "rns_hash": ""
+    },
+    "ct152": {
+      "label": "ct152 on x11-3",
+      "tcp_addr": "192.168.8.152",
+      "ygg_addr": "",
+      "i2p_dest": "",
+      "rns_hash": ""
+    },
+    "ct166": {
+      "label": "ct166 on x12-4",
+      "tcp_addr": "192.168.177.166",
+      "ygg_addr": "",
+      "i2p_dest": "",
+      "rns_hash": ""
+    }
+  },
+  "ports": {
+    "tcp_server": 9901,
+    "ygg_server": 9902,
+    "rns_port": 9903,
+    "i2p_sam": 7656
+  },
+  "test": {
+    "latency_pings": 10,
+    "throughput_runs": 3,
+    "throughput_mb": 2
+  }
+}
