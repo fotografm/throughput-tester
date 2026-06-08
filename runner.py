@@ -15,6 +15,7 @@ import argparse
 import sys
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
 from common import load_config, save_result, load_results, format_table, TestResult
 
@@ -73,11 +74,20 @@ def cmd_test(to_node: str, transports: list[str]):
     print(f"\nTesting  {from_label}  →  {to_label}")
     print(f"Transports: {', '.join(transports)}\n")
 
+    timeout_s = cfg.get("test", {}).get("transport_timeout_s", 180)
+
     results = []
     for t in transports:
         print(f"--- {t.upper()} ---")
         try:
-            r = mods[t].client(to_node)
+            with ThreadPoolExecutor(max_workers=1) as ex:
+                future = ex.submit(mods[t].client, to_node)
+                try:
+                    r = future.result(timeout=timeout_s)
+                except FuturesTimeout:
+                    print(f"  TIMEOUT after {timeout_s}s — skipping")
+                    print()
+                    continue
             result = TestResult(
                 transport        = t,
                 from_node        = from_label,
@@ -106,6 +116,14 @@ def cmd_test(to_node: str, transports: list[str]):
         for r in results:
             print(f"  {r.transport:<12} lat {r.latency_avg_ms:6.1f} ms  "
                   f"up {r.upload_mbps:6.2f} Mbps  dn {r.download_mbps:6.2f} Mbps")
+
+    # Show stored history for this pair
+    history = [r for r in load_results(40)
+               if (r.from_node == from_label and r.to_node == to_label)
+               or (r.from_node == to_label   and r.to_node == from_label)][:10]
+    if history:
+        print(f"\n=== History ({from_label} ↔ {to_label}) ===")
+        print(format_table(history))
 
 
 # ---------------------------------------------------------------------------

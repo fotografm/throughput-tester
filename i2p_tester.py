@@ -58,9 +58,9 @@ def _sam_hello(s: socket.socket):
         raise SAMError(f"HELLO failed: {r}")
 
 
-def _open_sam(sam_host: str, sam_port: int) -> socket.socket:
+def _open_sam(sam_host: str, sam_port: int, timeout: int = 120) -> socket.socket:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(120)
+    s.settimeout(timeout)
     s.connect((sam_host, sam_port))
     _sam_hello(s)
     return s
@@ -184,18 +184,30 @@ def server():
     sam_port = cfg["ports"]["i2p_sam"]
 
     privkey, dest = generate_or_load_keys(sam_host, sam_port)
-    session_id = f"thru-svr-{os.getpid()}"
+    svr_sid = f"thru-svr-{os.getpid()}"
 
-    # Session control socket — must stay open for the session lifetime
-    ctrl = _open_sam(sam_host, sam_port)
-    _sam_session_create(ctrl, "STREAM", session_id, privkey)
-    print(f"[i2p] server ready (session {session_id})")
+    # Retry SESSION CREATE until i2pd has built enough tunnels.
+    # On a freshly booted node this takes 60-120s; on a warmed node it's instant.
+    # Creating this session also warms i2pd's tunnel pool so client() is fast.
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            ctrl = _open_sam(sam_host, sam_port, timeout=300)
+            _sam_session_create(ctrl, "STREAM", svr_sid, privkey)
+            print(f"[i2p] server session ready after {attempt} attempt(s)", flush=True)
+            break
+        except Exception as e:
+            print(f"[i2p] session attempt {attempt} failed ({e}) — retrying in 30s", flush=True)
+            time.sleep(30)
+
+    # ctrl kept alive as local var for the lifetime of this function
 
     while True:
         # New SAM socket for each incoming stream (SAMv3: session ≠ stream socket)
         acc = _open_sam(sam_host, sam_port)
         try:
-            _sam_stream_accept(acc, session_id)
+            _sam_stream_accept(acc, svr_sid)
             # SAM sends the remote destination line when a client connects
             remote = _recv_line_sock(acc)
             print(f"[i2p] accepted stream from {remote[:32]}...")
@@ -225,11 +237,14 @@ def client(peer_node: str) -> dict:
     privkey, _ = generate_or_load_keys(sam_host, sam_port)
     session_id = f"thru-cli-{os.getpid()}"
 
-    # Session control socket (SAMv3: session and stream use separate sockets)
-    ctrl = _open_sam(sam_host, sam_port)
+    # Session control socket — kept open for the duration of the test.
+    # On a warmed i2pd node this completes in <1s; after a fresh reboot
+    # the service's server session (started at boot) will have already
+    # warmed i2pd's tunnel pool so this is also fast.
+    ctrl = _open_sam(sam_host, sam_port, timeout=300)
     _sam_session_create(ctrl, "STREAM", session_id, privkey)
 
-    # Stream socket for the actual data
+    # Stream socket for the actual test data
     sock = _open_sam(sam_host, sam_port)
     _sam_stream_connect(sock, session_id, peer_dest)
 

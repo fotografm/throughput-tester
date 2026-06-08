@@ -1,6 +1,7 @@
 [Unit]
 Description=Throughput Tester Server
 After=network.target yggdrasil.service i2pd.service
+Wants=yggdrasil.service i2pd.service
 
 [Service]
 Type=simple

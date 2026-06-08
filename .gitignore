@@ -6,3 +6,4 @@ rns_identity
 i2p_keys/
 .env
 config.json
+i2p_client_session.txt
