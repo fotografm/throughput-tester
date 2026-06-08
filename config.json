@@ -4,23 +4,23 @@
     "ct107": {
       "label": "ct107 on x12-2",
       "tcp_addr": "192.168.8.107",
-      "ygg_addr": "",
-      "i2p_dest": "",
-      "rns_hash": ""
+      "ygg_addr": "201:cdcc:40bb:f8af:45ca:f641:3f7b:b5a9",
+      "i2p_dest": "rGfKi6pdyTyYkCHvaKMOY~Ck03zpjMWmjqyWLfEx3LesZ8qLql3JPJiQIe9oow5j8KTTfOmMxaaOrJYt8THct6xnyouqXck8mJAh72ijDmPwpNN86YzFpo6sli3xMdy3rGfKi6pdyTyYkCHvaKMOY~Ck03zpjMWmjqyWLfEx3LesZ8qLql3JPJiQIe9oow5j8KTTfOmMxaaOrJYt8THct6xnyouqXck8mJAh72ijDmPwpNN86YzFpo6sli3xMdy3rGfKi6pdyTyYkCHvaKMOY~Ck03zpjMWmjqyWLfEx3LesZ8qLql3JPJiQIe9oow5j8KTTfOmMxaaOrJYt8THct6xnyouqXck8mJAh72ijDmPwpNN86YzFpo6sli3xMdy3rGfKi6pdyTyYkCHvaKMOY~Ck03zpjMWmjqyWLfEx3LesZ8qLql3JPJiQIe9oow5j8KTTfOmMxaaOrJYt8THctxBbw2H5FOATY9k3tfhv-xLSbGbq4lph392qDkEjXN5eBQAEAAcAAA==",
+      "rns_hash": "b9fb7546d0dd349c2828d5a82a20b289"
     },
     "ct152": {
       "label": "ct152 on x11-3",
       "tcp_addr": "192.168.8.152",
-      "ygg_addr": "",
-      "i2p_dest": "",
-      "rns_hash": ""
+      "ygg_addr": "200:f0b8:1243:4d2e:182a:2055:a5c:3032",
+      "i2p_dest": "X-jF82moiRn~Xo8IYoQjApvVk-4CL161o1FCNc7ptP1f6MXzaaiJGf9ejwhihCMCm9WT7gIvXrWjUUI1zum0~V~oxfNpqIkZ~16PCGKEIwKb1ZPuAi9etaNRQjXO6bT9X-jF82moiRn~Xo8IYoQjApvVk-4CL161o1FCNc7ptP1f6MXzaaiJGf9ejwhihCMCm9WT7gIvXrWjUUI1zum0~V~oxfNpqIkZ~16PCGKEIwKb1ZPuAi9etaNRQjXO6bT9X-jF82moiRn~Xo8IYoQjApvVk-4CL161o1FCNc7ptP1f6MXzaaiJGf9ejwhihCMCm9WT7gIvXrWjUUI1zum0~V~oxfNpqIkZ~16PCGKEIwKb1ZPuAi9etaNRQjXO6bT9X-jF82moiRn~Xo8IYoQjApvVk-4CL161o1FCNc7ptP1f6MXzaaiJGf9ejwhihCMCm9WT7gIvXrWjUUI1zum0~ScEJNrM67eLenXmhcJIswQv9gnSUbEwW6ifEY9y3dVDBQAEAAcAAA==",
+      "rns_hash": "d5c1f75328f77b57fc928a34c514fd4a"
     },
     "ct166": {
       "label": "ct166 on x12-4",
       "tcp_addr": "192.168.177.166",
-      "ygg_addr": "",
-      "i2p_dest": "",
-      "rns_hash": ""
+      "ygg_addr": "200:f008:847a:6814:d376:798f:e75c:66dc",
+      "i2p_dest": "wTO5LKAN5jFggXcIHqHPZOfmqhbsiiaOhryGAu~E-WHBM7ksoA3mMWCBdwgeoc9k5-aqFuyKJo6GvIYC78T5YcEzuSygDeYxYIF3CB6hz2Tn5qoW7Iomjoa8hgLvxPlhwTO5LKAN5jFggXcIHqHPZOfmqhbsiiaOhryGAu~E-WHBM7ksoA3mMWCBdwgeoc9k5-aqFuyKJo6GvIYC78T5YcEzuSygDeYxYIF3CB6hz2Tn5qoW7Iomjoa8hgLvxPlhwTO5LKAN5jFggXcIHqHPZOfmqhbsiiaOhryGAu~E-WHBM7ksoA3mMWCBdwgeoc9k5-aqFuyKJo6GvIYC78T5YcEzuSygDeYxYIF3CB6hz2Tn5qoW7Iomjoa8hgLvxPlhwTO5LKAN5jFggXcIHqHPZOfmqhbsiiaOhryGAu~E-WHBM7ksoA3mMWCBdwgeoc9k5-aqFuyKJo6GvIYC78T5YaQiEMUIc3yk2ursaKNZHMSphP1lcNQ-d37QlMsWfRVKBQAEAAcAAA==",
+      "rns_hash": "fa2dc3ff28d6b1a148fae89ddf382da7"
     }
   },
   "ports": {
