@@ -108,14 +108,10 @@ def generate_or_load_keys(sam_host: str, sam_port: int) -> tuple[str, str]:
         return data["privkey"], data["destination"]
 
     s = _open_sam(sam_host, sam_port)
-    dest = _sam_session_create(s, "STREAM", "keygen-session", "TRANSIENT")
-    # retrieve the full keypair via DEST GENERATE
-    s2 = _open_sam(sam_host, sam_port)
-    s2.sendall(b"DEST GENERATE SIGNATURE_TYPE=EdDSA_SHA512_Ed25519\n")
-    r = _sam_parse(_sam_readline(s2))
+    s.sendall(b"DEST GENERATE SIGNATURE_TYPE=EdDSA_SHA512_Ed25519\n")
+    r = _sam_parse(_sam_readline(s))
     privkey = r["PRIV"]
     pubdest = r["PUB"]
-    s2.close()
     s.close()
     KEY_FILE.write_text(json.dumps({"privkey": privkey, "destination": pubdest}))
     print(f"Generated I2P destination:\n{pubdest}")
