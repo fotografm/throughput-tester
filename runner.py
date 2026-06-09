@@ -17,7 +17,7 @@ import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
-from common import load_config, save_result, load_results, format_table, TestResult
+from common import load_config, save_result, load_results, format_table, trim_results, TestResult
 
 ALL_TRANSPORTS = ["tcp", "ygg", "i2p", "rns"]
 
@@ -119,6 +119,8 @@ def cmd_test(to_node: str, transports: list[str]):
         for r in results:
             print(f"  {r.transport:<12} lat {r.latency_avg_ms:6.1f} ms  "
                   f"up {r.upload_mbps:6.2f} Mbps  dn {r.download_mbps:6.2f} Mbps")
+
+    trim_results(days=7)
 
     # Show stored history for this pair
     history = [r for r in load_results(40)

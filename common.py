@@ -71,6 +71,17 @@ def load_results(limit: int = 50) -> list[TestResult]:
     return [TestResult(**dict(zip(keys, row))) for row in rows]
 
 
+def trim_results(days: int = 7):
+    """Delete rows older than `days` days to keep the database small."""
+    if not DB_PATH.exists():
+        return
+    cutoff = time.time() - days * 86400
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM results WHERE timestamp < ?", (cutoff,))
+    conn.commit()
+    conn.close()
+
+
 def format_table(results: list[TestResult]) -> str:
     if not results:
         return "No results stored."

@@ -1,0 +1,13 @@
+[Unit]
+Description=Throughput Tester Web Dashboard
+After=network.target throughput-tester.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/throughput-tester
+ExecStart=/opt/throughput-tester/venv/bin/python web_ui.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

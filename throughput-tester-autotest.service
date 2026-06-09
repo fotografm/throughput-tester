@@ -1,0 +1,11 @@
+[Unit]
+Description=Throughput Tester Autotest (ct152 -> ct166)
+After=network.target throughput-tester.service i2pd.service yggdrasil.service
+Wants=throughput-tester.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/throughput-tester
+ExecStart=/usr/local/bin/thru test --to ct166 --transport ygg,rns,i2p
+StandardOutput=append:/var/log/throughput-tester-autotest.log
+StandardError=append:/var/log/throughput-tester-autotest.log
