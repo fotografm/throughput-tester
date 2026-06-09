@@ -22,6 +22,14 @@ TRANSPORT = "i2p"
 KEY_FILE = Path(__file__).parent / "i2p_keys" / "tester.keys"
 CHUNK = 65536
 
+# 1-hop tunnels: much higher build success rate on firewalled/container nodes.
+# Anonymity not needed for benchmarking.
+TUNNEL_OPTS = "inbound.length=1 outbound.length=1 inbound.quantity=3 outbound.quantity=3"
+
+# Pre-created client SAM session — populated by init_i2p(), reused by client().
+_cli_ctrl: "socket.socket | None" = None
+_CLI_SID = f"thru-cli-{os.getpid()}"
+
 
 # ---------------------------------------------------------------------------
 # Minimal synchronous SAMv3 helper
@@ -194,7 +202,7 @@ def server():
         attempt += 1
         try:
             ctrl = _open_sam(sam_host, sam_port, timeout=300)
-            _sam_session_create(ctrl, "STREAM", svr_sid, privkey)
+            _sam_session_create(ctrl, "STREAM", svr_sid, privkey, extra=TUNNEL_OPTS)
             print(f"[i2p] server session ready after {attempt} attempt(s)", flush=True)
             break
         except Exception as e:
@@ -222,6 +230,30 @@ def server():
 # Client
 # ---------------------------------------------------------------------------
 
+def init_i2p():
+    """Pre-create a TRANSIENT client SAM session with short tunnels.
+    Call once from the main thread before running tests so client() only
+    needs STREAM CONNECT (no per-test SESSION CREATE delay)."""
+    global _cli_ctrl
+    cfg = load_config()
+    sam_host = "127.0.0.1"
+    sam_port = cfg["ports"]["i2p_sam"]
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            ctrl = _open_sam(sam_host, sam_port, timeout=300)
+            _sam_session_create(ctrl, "STREAM", _CLI_SID, "TRANSIENT",
+                                extra=TUNNEL_OPTS)
+            _cli_ctrl = ctrl
+            print(f"[i2p] client session ready after {attempt} attempt(s)", flush=True)
+            break
+        except Exception as e:
+            print(f"[i2p] client session attempt {attempt} failed ({e}) — retrying in 30s",
+                  flush=True)
+            time.sleep(30)
+
+
 def client(peer_node: str) -> dict:
     cfg = load_config()
     peer_dest = cfg["nodes"][peer_node]["i2p_dest"]
@@ -234,15 +266,19 @@ def client(peer_node: str) -> dict:
     runs = t["throughput_runs"]
     n_bytes = t["throughput_mb"] * 1024 * 1024
 
-    privkey, _ = generate_or_load_keys(sam_host, sam_port)
-    session_id = f"thru-cli-{os.getpid()}"
-
-    # Session control socket — kept open for the duration of the test.
-    # On a warmed i2pd node this completes in <1s; after a fresh reboot
-    # the service's server session (started at boot) will have already
-    # warmed i2pd's tunnel pool so this is also fast.
-    ctrl = _open_sam(sam_host, sam_port, timeout=300)
-    _sam_session_create(ctrl, "STREAM", session_id, privkey)
+    if _cli_ctrl is not None:
+        # Reuse pre-created session — no SESSION CREATE delay.
+        ctrl = _cli_ctrl
+        session_id = _CLI_SID
+        close_ctrl = False
+    else:
+        # Fall back: create on demand with short tunnels.
+        privkey, _ = generate_or_load_keys(sam_host, sam_port)
+        session_id = f"thru-cli-{os.getpid()}"
+        ctrl = _open_sam(sam_host, sam_port, timeout=300)
+        _sam_session_create(ctrl, "STREAM", session_id, "TRANSIENT",
+                            extra=TUNNEL_OPTS)
+        close_ctrl = True
 
     # Stream socket for the actual test data
     sock = _open_sam(sam_host, sam_port)
@@ -286,7 +322,8 @@ def client(peer_node: str) -> dict:
 
     sock.sendall(b"BYE\n")
     sock.close()
-    ctrl.close()
+    if close_ctrl:
+        ctrl.close()
 
     return {
         "latency_avg_ms":    lat_avg,

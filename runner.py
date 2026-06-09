@@ -71,6 +71,9 @@ def cmd_test(to_node: str, transports: list[str]):
     # Pre-init RNS in main thread before any tests run
     if "rns" in transports:
         mods["rns"].init_rns()
+    # Pre-create I2P client session so client() only needs STREAM CONNECT
+    if "i2p" in transports:
+        mods["i2p"].init_i2p()
     print(f"\nTesting  {from_label}  →  {to_label}")
     print(f"Transports: {', '.join(transports)}\n")
 
