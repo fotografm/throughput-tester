@@ -257,6 +257,8 @@ def client(peer_node: str) -> dict:
             channel.send(_TesterMsg({"cmd": "UPLOAD", "data": os.urandom(size)}))
             sent += size
         elapsed_ms = (time.monotonic() - t0) * 1000
+        while not channel.is_ready_to_send():
+            time.sleep(0.01)
         channel.send(_TesterMsg({"cmd": "UPLOAD_DONE",
                                  "n": n_bytes, "elapsed_ms": elapsed_ms}))
         _wait(60)  # UPLOAD_ACK
