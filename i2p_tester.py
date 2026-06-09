@@ -24,7 +24,12 @@ CHUNK = 65536
 
 # 1-hop tunnels: much higher build success rate on firewalled/container nodes.
 # Anonymity not needed for benchmarking.
-TUNNEL_OPTS = "inbound.length=1 outbound.length=1 inbound.quantity=3 outbound.quantity=3"
+# Server uses more inbound tunnels to reduce the chance of a rebuild cycle leaving
+# the server unreachable (with 30% success rate, 3 tunnels → 34% chance all fail;
+# 8 tunnels → 5.7% chance all fail).
+CLIENT_TUNNEL_OPTS = "inbound.length=1 outbound.length=1 inbound.quantity=3 outbound.quantity=3"
+SERVER_TUNNEL_OPTS = "inbound.length=1 outbound.length=1 inbound.quantity=8 outbound.quantity=3"
+TUNNEL_OPTS = CLIENT_TUNNEL_OPTS  # kept for backwards compat; client() uses CLIENT_TUNNEL_OPTS
 
 # Pre-created client SAM session — populated by init_i2p(), reused by client().
 _cli_ctrl: "socket.socket | None" = None
@@ -202,7 +207,7 @@ def server():
         attempt += 1
         try:
             ctrl = _open_sam(sam_host, sam_port, timeout=300)
-            _sam_session_create(ctrl, "STREAM", svr_sid, privkey, extra=TUNNEL_OPTS)
+            _sam_session_create(ctrl, "STREAM", svr_sid, privkey, extra=SERVER_TUNNEL_OPTS)
             print(f"[i2p] server session ready after {attempt} attempt(s)", flush=True)
             break
         except Exception as e:
@@ -244,7 +249,7 @@ def init_i2p():
         try:
             ctrl = _open_sam(sam_host, sam_port, timeout=300)
             _sam_session_create(ctrl, "STREAM", _CLI_SID, "TRANSIENT",
-                                extra=TUNNEL_OPTS)
+                                extra=CLIENT_TUNNEL_OPTS)
             _cli_ctrl = ctrl
             print(f"[i2p] client session ready after {attempt} attempt(s)", flush=True)
             break
@@ -277,12 +282,31 @@ def client(peer_node: str) -> dict:
         session_id = f"thru-cli-{os.getpid()}"
         ctrl = _open_sam(sam_host, sam_port, timeout=300)
         _sam_session_create(ctrl, "STREAM", session_id, "TRANSIENT",
-                            extra=TUNNEL_OPTS)
+                            extra=CLIENT_TUNNEL_OPTS)
         close_ctrl = True
 
-    # Stream socket for the actual test data
-    sock = _open_sam(sam_host, sam_port)
-    _sam_stream_connect(sock, session_id, peer_dest)
+    # Stream socket for the actual test data.
+    # Retry up to 3 times on transient I2P failures (CANT_REACH_PEER, closed connection).
+    MAX_CONNECT_ATTEMPTS = 3
+    sock = None
+    for attempt in range(1, MAX_CONNECT_ATTEMPTS + 1):
+        try:
+            s = _open_sam(sam_host, sam_port)
+            _sam_stream_connect(s, session_id, peer_dest)
+            sock = s
+            break
+        except (SAMError, ConnectionError, OSError) as e:
+            print(f"[i2p] connect attempt {attempt}/{MAX_CONNECT_ATTEMPTS} failed: {e}", flush=True)
+            try:
+                s.close()
+            except Exception:
+                pass
+            if attempt < MAX_CONNECT_ATTEMPTS:
+                time.sleep(5)
+    if sock is None:
+        if close_ctrl:
+            ctrl.close()
+        raise ConnectionError(f"I2P STREAM CONNECT failed after {MAX_CONNECT_ATTEMPTS} attempts")
 
     # latency
     rtts = []
