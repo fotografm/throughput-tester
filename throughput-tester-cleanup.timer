@@ -1,0 +1,10 @@
+[Unit]
+Description=Throughput Tester Daily Cleanup
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+Persistent=true
+Unit=throughput-tester-cleanup.service
+
+[Install]
+WantedBy=timers.target

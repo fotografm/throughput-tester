@@ -1,0 +1,9 @@
+[Unit]
+Description=Throughput Tester Daily Cleanup
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/throughput-tester/cleanup.sh
+StandardOutput=journal
+StandardError=journal
