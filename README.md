@@ -13,24 +13,34 @@ in isolation so results are directly comparable.
 | **I2P** | SAMv3 streaming via local i2pd daemon | Anonymising darknet layer (garlic routing) |
 | **Reticulum (RNS)** | RNS Link + Channel API via public relay mesh | Reticulum protocol + relay hops |
 
-RNS uses the public relay backbone (rns.beleth.net, styrene, noDNS1/noDNS2 and
-others) for inter-site connectivity, keeping the Reticulum measurement fully
-independent of the Yggdrasil measurement.
+RNS uses the public relay backbone for inter-site connectivity, keeping the
+Reticulum measurement fully independent of the Yggdrasil measurement.
 
 ## Infrastructure
 
+> **Note:** CT numbers, server names, hostnames, and LAN IP addresses below
+> are specific to this deployment. On a different system these will all be
+> different — only the software setup and port assignments matter.
+
 ### Nodes
 
-| Node | Label | Proxmox host | LAN IP | Yggdrasil IPv6 |
-|------|-------|-------------|--------|----------------|
-| ct107 | ct107 on x12-2 | x12-2 @ 192.168.8.60 | 192.168.8.107 | 201:cdcc:40bb:f8af:45ca:f641:3f7b:b5a9 |
-| ct152 | ct152 on x11-3 | x11-3 @ 192.168.8.40 | 192.168.8.152 | 200:f0b8:1243:4d2e:182a:2055:a5c:3032 |
-| ct166 | ct166 on x12-4 | x12-4 @ 192.168.177.20 | 192.168.177.166 | 200:f008:847a:6814:d376:798f:e75c:66dc |
+| Node | Label | Proxmox host | LAN IP |
+|------|-------|-------------|--------|
+| ct107 | ct107 on x12-2 | x12-2 @ 192.168.8.60 | 192.168.8.107 |
+| ct152 | ct152 on x11-3 | x11-3 @ 192.168.8.40 | 192.168.8.152 |
+| ct166 | ct166 on x12-4 | x12-4 @ 192.168.177.20 | 192.168.177.166 |
 
 All three are Debian 12 LXC containers. Each runs:
 - **yggdrasil** — connected to the global Yggdrasil mesh
-- **i2pd** — firewalled I2P node (published=false, client-only transport)
-- **throughput-tester.service** — this project's server listeners and RNS mesh node
+- **i2pd** — firewalled I2P node (`published=false`, client-only transport)
+- **throughput-tester.service** — server listeners and RNS mesh node
+
+**ct152 additionally runs:**
+- **throughput-tester-web.service** — web dashboard on port 80, showing rolling
+  24-hour graphs per transport pair with on-demand test buttons
+- **throughput-tester-autotest.timer** — fires every 30 minutes, runs
+  `thru test --to ct166 --transport ygg,rns,i2p` and stores results to
+  `results.db`, feeding the graphs automatically
 
 Services are enabled and survive reboot. The three RNS nodes form a complete
 mesh via the public relay backbone with continuous announcements.
@@ -83,6 +93,10 @@ thru results --last 50
 Sample output:
 
 ```
+[i2p] client session ready after 1 attempt(s)
+[i2p] warmup: probing ct107...
+[i2p] warmup OK in 4823 ms (attempt 1)
+
 Testing  ct152 on x11-3  →  ct107 on x12-2
 Transports: tcp, ygg, i2p, rns
 
@@ -105,17 +119,13 @@ Transports: tcp, ygg, i2p, rns
   Latency:  avg 1.4 ms  min 1.2  max 1.9  jitter 0.2 ms
   Upload:   95.28 Mbps
   Download: 115.10 Mbps
-
-=== Summary ===
-  tcp          lat    0.3 ms  up 900.44 Mbps  dn 417.61 Mbps
-  ygg          lat   78.3 ms  up  19.00 Mbps  dn  10.17 Mbps
-  i2p          lat  239.5 ms  up   1.59 Mbps  dn   0.90 Mbps
-  rns          lat    1.4 ms  up  95.28 Mbps  dn 115.10 Mbps
 ```
 
 Each transport has a per-transport timeout (default 300 s, configurable via
 `transport_timeout_s` in `config.json`). A transport that fails or takes too
 long is skipped with a clear message and does not block the others.
+
+To view historical results separately, use `thru results [--last N]`.
 
 ## Configuration
 
@@ -130,7 +140,7 @@ the starting point.
     "ct107": {
       "label":    "ct107 on x12-2",
       "tcp_host": "192.168.8.107",
-      "ygg_host": "201:cdcc:40bb:f8af:45ca:f641:3f7b:b5a9",
+      "ygg_host": "<yggdrasil-ipv6>",
       "i2p_dest": "<base64 destination>",
       "rns_hash": "<hex hash>"
     },
@@ -163,10 +173,23 @@ runner.py server          ← systemd service, always running
 
 runner.py test --to <node> --transport <...>
   ├── init_i2p()             pre-creates client SAM session (1-hop tunnels)
+  ├── warmup_i2p()           pre-flight probe — see I2P details below
   ├── init_rns()             attaches to running RNS instance (share_instance=Yes)
   └── for each transport:
         run client in thread with transport_timeout_s deadline
-        print result / save to results.db / show history
+        print result / save to results.db
+
+throughput-tester-autotest.timer  (ct152 only)
+  └── fires every 30 min → thru test --to ct166 --transport ygg,rns,i2p
+
+throughput-tester-web.service     (ct152 only)
+  └── Flask app on port 80 → reads results.db → 24h graphs + on-demand tests
+
+throughput-tester-cleanup.timer   (all nodes)
+  └── fires daily at 03:15 UTC → cleanup.sh
+        trims results.db to 7 days
+        purges i2pd peerProfiles >30 days, netDb >14 days, tags >7 days
+        warns to journal if /var/lib/i2pd exceeds 200 MB
 ```
 
 ### I2P details
@@ -174,8 +197,7 @@ runner.py test --to <node> --transport <...>
 The server uses a persistent private key (`i2p_keys/tester.keys`) so its
 destination is stable across restarts. The client session is pre-created once
 by `init_i2p()` before the test loop, so per-test overhead is only a SAM
-`STREAM CONNECT` (~5 s to find the peer's LeaseSet) rather than a full session
-build each time.
+`STREAM CONNECT` rather than a full session build each time.
 
 Tunnel configuration (written as SAM session options):
 
@@ -191,10 +213,22 @@ The nodes still build outbound tunnels and participate normally as clients.
 ct166 runs with `bandwidth=P` (higher than the default L) to help LeaseSet
 publication propagate to the wider floodfill network.
 
-**I2P warm-up:** After a fresh i2pd start, expect 30–60 minutes before tunnel
-build success rates stabilise and the node's LeaseSet is reliably findable by
-peers. During this window the I2P test may timeout and skip. Nodes that have
-been running for several hours are fully functional.
+**I2P warm-up (initial startup):** After a fresh i2pd start, expect 30–60
+minutes before tunnel build success rates stabilise and the node's LeaseSet is
+reliably findable by peers. During this window the I2P test may timeout and
+skip. Nodes that have been running for several hours are fully functional.
+
+**Pre-test warmup probe (`warmup_i2p`):** Even on a fully warmed-up node, a
+LeaseSet expires every 10 minutes. If the 30-minute autotest timer fires at the
+exact moment the remote node's LeaseSet has expired and not yet been re-fetched
+by floodfills, the test encounters `CANT_REACH_PEER` and falls back through the
+retry logic, producing artificially high latency figures (90 s+ max spikes were
+observed). To prevent this, `warmup_i2p()` opens a throwaway SAM stream to the
+target, sends a PING, and closes it — all before the timed measurement begins.
+This forces the LeaseSet lookup and tunnel build to complete during the warmup
+rather than during the measurement. The warmup output appears before the test
+results and retries up to 3 times with 5 s gaps; if all three fail the test
+proceeds anyway (the failure is already known at that point).
 
 **Client STREAM CONNECT retry:** `client()` retries the SAM `STREAM CONNECT`
 up to 3 times with a 5 s gap, so transient `CANT_REACH_PEER` responses
@@ -236,12 +270,19 @@ sending, especially after an upload burst, to avoid `ChannelException(ME_LINK_NO
 | `rns_tester.py` | Reticulum RNS test |
 | `socket_tester.py` | Shared TCP socket test logic (used by tcp + ygg) |
 | `common.py` | Config loader, SQLite result storage, table formatter |
+| `web_ui.py` | Flask web dashboard — 24h graphs and on-demand test trigger |
+| `cleanup.sh` | Daily cleanup script — trims results.db and i2pd storage |
 | `config.template.json` | Template with blank endpoint addresses |
 | `config.json` | Live config with real addresses — **gitignored** |
 | `rns_config/` | Per-node RNS daemon config — **gitignored** |
 | `i2p_keys/` | Persistent I2P identity keys — **gitignored** |
 | `install.sh` | Provisioning script for a new node |
-| `throughput-tester.service` | systemd unit file |
+| `throughput-tester.service` | systemd unit — server listeners (all nodes) |
+| `throughput-tester-web.service` | systemd unit — web dashboard (ct152 only) |
+| `throughput-tester-autotest.service` | systemd unit — autotest oneshot (ct152 only) |
+| `throughput-tester-autotest.timer` | systemd timer — fires every 30 min (ct152 only) |
+| `throughput-tester-cleanup.service` | systemd unit — daily cleanup oneshot (all nodes) |
+| `throughput-tester-cleanup.timer` | systemd timer — fires daily 03:15 UTC (all nodes) |
 | `playbook.md` | Full step-by-step deployment guide |
 | `results.db` | SQLite results database — **gitignored** |
 
@@ -249,12 +290,13 @@ sending, especially after an upload burst, to avoid `ChannelException(ME_LINK_NO
 
 See `playbook.md` for the full procedure. Quick overview:
 
-1. Clone a Debian 12 CT from ct150, assign IP and hostname
+1. Clone a Debian 12 CT from a template, assign IP and hostname
 2. `apt install git && git clone https://github.com/fotografm/throughput-tester /opt/throughput-tester`
 3. `bash /opt/throughput-tester/install.sh <node-id>`
-4. Collect addresses: `thru ygg`, `thru rns-hash`, `thru i2p-keygen`
+4. Collect addresses: Yggdrasil IPv6, RNS hash, I2P destination
 5. Add the new node to `config.json` on all existing nodes; copy updated config to new node
-6. `systemctl enable --now throughput-tester`
+6. Enable services: `throughput-tester` on all nodes; `throughput-tester-web` and
+   `throughput-tester-autotest.timer` on the designated autotest node
 
 UFW rules required on each node:
 
@@ -278,5 +320,6 @@ CREATE TABLE results (
 );
 ```
 
-A web interface with per-pair graphs and on-demand test buttons can be layered
-on top of this database without changes to the measurement layer.
+Results are retained for 7 days, trimmed automatically by the daily cleanup
+timer. Query manually with `thru results [--last N]` or inspect `results.db`
+directly with any SQLite tool.
