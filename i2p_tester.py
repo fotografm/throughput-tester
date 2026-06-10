@@ -259,6 +259,43 @@ def init_i2p():
             time.sleep(30)
 
 
+def warmup_i2p(peer_node: str) -> bool:
+    """Pre-flight probe: force LeaseSet fetch and tunnel build to peer before
+    the timed test runs.  Returns True on success, False if all attempts fail
+    (caller proceeds anyway — better to measure than to skip)."""
+    cfg = load_config()
+    peer_dest = cfg["nodes"][peer_node]["i2p_dest"]
+    if not peer_dest or _cli_ctrl is None:
+        return False
+    sam_host = "127.0.0.1"
+    sam_port = cfg["ports"]["i2p_sam"]
+    print(f"[i2p] warmup: probing {peer_node}...", flush=True)
+    t0 = time.monotonic()
+    for attempt in range(1, 4):
+        s = None
+        try:
+            s = _open_sam(sam_host, sam_port, timeout=60)
+            _sam_stream_connect(s, _CLI_SID, peer_dest)
+            s.sendall(b"PING\n")
+            resp = _recv_line_sock(s)
+            s.sendall(b"BYE\n")
+            s.close()
+            elapsed = (time.monotonic() - t0) * 1000
+            print(f"[i2p] warmup OK in {elapsed:.0f} ms (attempt {attempt})", flush=True)
+            return True
+        except Exception as e:
+            print(f"[i2p] warmup attempt {attempt}/3 failed: {e}", flush=True)
+            if s is not None:
+                try:
+                    s.close()
+                except Exception:
+                    pass
+            if attempt < 3:
+                time.sleep(5)
+    print("[i2p] warmup failed — proceeding with test anyway", flush=True)
+    return False
+
+
 def client(peer_node: str) -> dict:
     cfg = load_config()
     peer_dest = cfg["nodes"][peer_node]["i2p_dest"]

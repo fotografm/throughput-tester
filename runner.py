@@ -71,9 +71,11 @@ def cmd_test(to_node: str, transports: list[str]):
     # Pre-init RNS in main thread before any tests run
     if "rns" in transports:
         mods["rns"].init_rns()
-    # Pre-create I2P client session so client() only needs STREAM CONNECT
+    # Pre-create I2P client session, then warmup probe to force LeaseSet fetch
+    # and tunnel build before the timed measurement starts.
     if "i2p" in transports:
         mods["i2p"].init_i2p()
+        mods["i2p"].warmup_i2p(to_node)
     print(f"\nTesting  {from_label}  →  {to_label}")
     print(f"Transports: {', '.join(transports)}\n")
 
@@ -114,21 +116,7 @@ def cmd_test(to_node: str, transports: list[str]):
             print(f"  ERROR: {e}")
         print()
 
-    if len(results) > 1:
-        print("=== Summary ===")
-        for r in results:
-            print(f"  {r.transport:<12} lat {r.latency_avg_ms:6.1f} ms  "
-                  f"up {r.upload_mbps:6.2f} Mbps  dn {r.download_mbps:6.2f} Mbps")
-
     trim_results(days=7)
-
-    # Show stored history for this pair
-    history = [r for r in load_results(40)
-               if (r.from_node == from_label and r.to_node == to_label)
-               or (r.from_node == to_label   and r.to_node == from_label)][:10]
-    if history:
-        print(f"\n=== History ({from_label} ↔ {to_label}) ===")
-        print(format_table(history))
 
 
 # ---------------------------------------------------------------------------
