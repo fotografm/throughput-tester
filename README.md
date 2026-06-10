@@ -38,6 +38,8 @@ All three are Debian 12 LXC containers. Each runs:
 **ct152 additionally runs:**
 - **throughput-tester-web.service** — web dashboard on port 80, showing rolling
   24-hour graphs per transport pair with on-demand test buttons
+
+![Web dashboard showing 24-hour upload, download and latency graphs for ct152→ct166](docs/web-dashboard.png)
 - **throughput-tester-autotest.timer** — fires every 30 minutes, runs
   `thru test --to ct166 --transport ygg,rns,i2p` and stores results to
   `results.db`, feeding the graphs automatically
